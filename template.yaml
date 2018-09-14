@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: certbot
+  annotations:
+    description: "Certbot"
+    iconClass: "file-certificate"
+    tags: "certbot,letsencrypt,router"
+objects:
+- apiVersion: batch/v1beta1
+  kind: CronJob
+  metadata:
+    name: "certbot-${ROUTE_NAME}"
+  spec:
+    jobTemplate:
+      spec:
+        template:
+          metadata:
+            labels:
+              parent: "cronjob-certbot-${ROUTE_NAME}"
+          spec:
+            containers:
+            - command: ['bash', '-c', "oc create route edge nginx-example --service nginx-example --ca-cert /etc/letsencrypt/live/${HOST_NAME}/chain.pem --cert /etc/letsencrypt/live/${HOST_NAME}/cert.pem --key /etc/letsencrypt/live/${HOST_NAME}/privkey.pem --dry-run -o yaml | oc replace -f -"]
+              image: openshift/origin
+              name: patch-route
+              volumeMounts:
+                - name: letsencrypt-etc
+                  mountPath: /etc/letsencrypt/
+            initContainers:
+            - name: certbot
+              image: certbot/dns-cloudflare
+              command: ['certbot', 'certonly', '--dns-cloudflare', '--dns-cloudflare-credentials', '/var/run/secrets/cloudflare/cloudflare.ini', '-d', "${HOST_NAME}", '-n', '--agree-tos', '--email', 'info@outtherelabs.com']
+              volumeMounts:
+              - name: cloudflare-credentials
+                mountPath: /var/run/secrets/cloudflare
+              - mountPath: /etc/letsencrypt/
+                name: letsencrypt-etc
+              - mountPath: /var/log/letsencrypt/
+                name: letsencrypt-log
+              - mountPath: /var/lib/letsencrypt/
+                name: letsencrypt-lib
+            restartPolicy: Never
+            serviceAccount: certbot
+            volumes:
+              - name: cloudflare-credentials
+                secret:
+                  secretName: ${SECRET_NAME}
+              - name: letsencrypt-etc
+                emptyDir: {}
+              - name: letsencrypt-log
+                emptyDir: {}
+              - name: letsencrypt-lib
+                emptyDir: {}
+    schedule: "0 0 1 * *"
+parameters:
+- description: Name of the route
+  name: ROUTE_NAME
+  required: true
+- description: Name of the service
+  name: SERVICE_NAME
+  required: true
+- description: Host name
+  name: HOST_NAME
+  required: true
+- name: SECRET_NAME
+  value: cloudflare-credentials
